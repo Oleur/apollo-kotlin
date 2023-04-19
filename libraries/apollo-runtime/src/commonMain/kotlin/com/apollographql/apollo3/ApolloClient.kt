@@ -197,6 +197,7 @@ private constructor(
     private var httpExposeErrorBody: Boolean? = null
     private var webSocketEngine: WebSocketEngine? = null
     private var webSocketReopenWhen: (suspend (Throwable, attempt: Long) -> Boolean)? = null
+    private var webSocketReopenServerUrl: (suspend () -> String)? = null
 
     init {
       failOnNativeIfLegacyMemoryManager()
@@ -316,11 +317,25 @@ private constructor(
 
     /**
      * The url of the GraphQL server used for WebSockets
+     * Use this function or webSocketServerUrl((suspend () -> String)) but not both.
      *
      * See also [subscriptionNetworkTransport] for more customization
      */
     fun webSocketServerUrl(webSocketServerUrl: String) = apply {
       this.webSocketServerUrl = webSocketServerUrl
+    }
+
+    /**
+     * Configure dynamically the url of the GraphQL server used for WebSockets.
+     * Use this function or webSocketServerUrl(String) but not both.
+     *
+     * @param webSocketServerUrl a function return the new server URL to use when reopening the [WebSocketNetworkTransport] containing
+     * the new auth credentials for example in case of an unauthorized error with the web socket.
+     *
+     * It is a suspending function, so it can be used to introduce delay before setting the new server URL.
+     */
+    fun webSocketServerUrl(webSocketServerUrl: (suspend () -> String)) = apply {
+      this.webSocketReopenServerUrl = webSocketServerUrl
     }
 
     /**
@@ -527,6 +542,9 @@ private constructor(
         check(webSocketReopenWhen == null) {
           "Apollo: 'webSocketReopenWhen' has no effect if 'subscriptionNetworkTransport' is set"
         }
+        check(webSocketReopenServerUrl == null) {
+          "Apollo: 'webSocketReopenServerUrl' has no effect if 'subscriptionNetworkTransport' is set"
+        }
         subscriptionNetworkTransport!!
       } else {
         val url = webSocketServerUrl ?: httpServerUrl
@@ -549,6 +567,9 @@ private constructor(
                 }
                 if (webSocketReopenWhen != null) {
                   reopenWhen(webSocketReopenWhen)
+                }
+                if (webSocketReopenServerUrl != null) {
+                  serverUrl(webSocketReopenServerUrl)
                 }
               }
               .build()

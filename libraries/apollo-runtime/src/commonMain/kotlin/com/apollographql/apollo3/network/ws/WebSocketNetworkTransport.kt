@@ -57,12 +57,13 @@ import okio.use
  */
 class WebSocketNetworkTransport
 private constructor(
-    private val serverUrl: String,
+    private val serverUrl: String?,
     private val headers: List<HttpHeader>,
     private val webSocketEngine: WebSocketEngine = DefaultWebSocketEngine(),
     private val idleTimeoutMillis: Long = 60_000,
     private val protocolFactory: WsProtocol.Factory = SubscriptionWsProtocol.Factory(),
     private val reopenWhen: (suspend (Throwable, attempt: Long) -> Boolean)?,
+    private val reopenServerUrl: (suspend () -> String)?,
 ) : NetworkTransport {
 
   /**
@@ -187,7 +188,7 @@ private constructor(
 
             val webSocketConnection = try {
               webSocketEngine.open(
-                  url = serverUrl,
+                  url = reopenServerUrl?.invoke() ?: serverUrl ?: error("No serverUrl specified"),
                   headers = if (headers.any { it.name == "Sec-WebSocket-Protocol" }) {
                     headers
                   } else {
@@ -353,9 +354,22 @@ private constructor(
     private var idleTimeoutMillis: Long? = null
     private var protocolFactory: WsProtocol.Factory? = null
     private var reopenWhen: (suspend (Throwable, attempt: Long) -> Boolean)? = null
+    private var reopenServerUrl: (suspend () -> String)? = null
 
     fun serverUrl(serverUrl: String) = apply {
       this.serverUrl = serverUrl
+    }
+
+    /**
+     * Configure dynamically the server URL.
+     *
+     * @param serverUrl a function return the new server URL to use when reopening the [WebSocketNetworkTransport] containing
+     * the new auth credentials for example in case of an unauthorized error with the web socket.
+     *
+     * It is a suspending function, so it can be used to introduce delay before setting the new serverUrl.
+     */
+    fun serverUrl(serverUrl: (suspend () -> String)?) = apply {
+      this.reopenServerUrl = serverUrl
     }
 
     fun addHeader(name: String, value: String) = apply {
@@ -398,14 +412,16 @@ private constructor(
     }
 
     fun build(): WebSocketNetworkTransport {
-      @Suppress("DEPRECATION")
+      if (serverUrl != null && reopenServerUrl != null) error("You can't have a static and a dynamic serverUrl at the same time")
+      if (serverUrl == null && reopenServerUrl == null) error("No serverUrl specified")
       return WebSocketNetworkTransport(
-          serverUrl ?: error("No serverUrl specified"),
+          serverUrl,
           headers,
           webSocketEngine ?: DefaultWebSocketEngine(),
           idleTimeoutMillis ?: 60_000,
           protocolFactory ?: SubscriptionWsProtocol.Factory(),
-          reopenWhen
+          reopenWhen,
+          reopenServerUrl
       )
     }
   }
